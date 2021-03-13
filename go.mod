@@ -8,21 +8,24 @@ replace (
 	google.golang.org/grpc => google.golang.org/grpc v1.28.0
 )
 
+replace github.com/muvaf/typewriter => /Users/monus/go/src/github.com/muvaf/typewriter
+
 require (
 	cloud.google.com/go v0.57.0
 	cloud.google.com/go/pubsub v1.3.1
 	cloud.google.com/go/storage v1.6.0
 	github.com/crossplane/crossplane-runtime v0.13.0
 	github.com/crossplane/crossplane-tools v0.0.0-20201201125637-9ddc70edfd0d
-	github.com/google/go-cmp v0.5.2
+	github.com/google/go-cmp v0.5.4
 	github.com/googleapis/gax-go v1.0.3
 	github.com/googleapis/gax-go/v2 v2.0.5
 	github.com/imdario/mergo v0.3.10
 	github.com/kr/text v0.2.0 // indirect
 	github.com/mitchellh/copystructure v1.0.0
+	github.com/muvaf/typewriter v0.0.0-20210322104753-133a72cc3e03
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/pkg/errors v0.9.1
-	golang.org/x/tools v0.0.0-20200916195026-c9a70fc28ce3 // indirect
+	golang.org/x/tools v0.1.0
 	google.golang.org/api v0.22.0
 	google.golang.org/genproto v0.0.0-20201110150050-8816d57aaa9a
 	google.golang.org/grpc v1.29.1
