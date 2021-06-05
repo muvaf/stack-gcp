@@ -16,3 +16,10 @@ limitations under the License.
 
 package generator
 
+// NOTE(muvaf): We need to import a valid package with Go files here so that
+// declarative-resource-client-library module is accepted as valid import. Likely,
+// it won't be needed once we have at least one resource generated.
+
+import (
+	_ "github.com/GoogleCloudPlatform/declarative-resource-client-library/services/google/dataproc"
+)

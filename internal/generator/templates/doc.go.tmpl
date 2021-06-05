@@ -1,0 +1,8 @@
+{{ .Header }}
+
+// Package {{ .PackageName }} contains managed resources for GCP
+// {{ .Group.ShortName }} services.
+// +kubebuilder:object:generate=true
+// +groupName={{ .Group.LongName }}
+// +versionName={{ .Group.APIVersion }}
+package {{ .PackageName }}
