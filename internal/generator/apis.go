@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"go/token"
 	"go/types"
+	"path/filepath"
 	"strings"
 
 	"github.com/muvaf/typewriter/pkg/cmd"
@@ -30,6 +31,14 @@ import (
 
 	"github.com/crossplane/provider-gcp/internal/generator/templates"
 )
+
+func NewGroup(shortName, longName, apiVersion string) *Group {
+	return &Group{
+		ShortName:  shortName,
+		LongName:   longName,
+		APIVersion: apiVersion,
+	}
+}
 
 type Group struct {
 	ShortName  string
@@ -63,36 +72,43 @@ func (g *Group) GenerateGroupVersionFile() ([]byte, error) {
 	return b, nil
 }
 
-type CRD struct {
-	Cache              *packages.Cache
-	LocalPackagePath   string
-	GoogleGroupName    string
-	GoogleResourceName string
-	Group              Group
+func NewResources(c *packages.Cache, remotePackagePath, localPkgPath string, group Group) *Resources {
+	return &Resources{
+		cache:             c,
+		LocalPackagePath:  localPkgPath,
+		RemotePackagePath: remotePackagePath,
+		Group:             group,
+	}
 }
 
-func (c *CRD) GenerateCRDFile() ([]byte, error) {
-	localPkgPath, localPkgName := c.LocalPackagePath, c.LocalPackagePath[strings.LastIndex(c.LocalPackagePath, "/")+1:]
-	remotePkgPath := fmt.Sprintf("github.com/GoogleCloudPlatform/declarative-resource-client-library/services/google/%s", c.GoogleGroupName)
+type Resources struct {
+	cache             *packages.Cache
+	LocalPackagePath  string
+	RemotePackagePath string
+	Group             Group
+}
+
+func (r *Resources) GenerateCRDFile(googleGroupName, googleResourceName string) ([]byte, error) {
+	localPkgPath, localPkgName := r.LocalPackagePath, r.LocalPackagePath[strings.LastIndex(r.LocalPackagePath, "/")+1:]
+	remotePkgPath := filepath.Join(r.RemotePackagePath, googleGroupName)
 	file := wrapper.NewFile(localPkgName, templates.CRDTypesTemplate,
 		wrapper.WithHeaderPath("hack/boilerplate.go.txt"))
 
-	localPkg, err := c.Cache.GetPackage(localPkgPath)
+	localPkg, err := r.cache.GetPackage(localPkgPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "cannot load local package: %s", localPkg)
 	}
 
-	paramsName := types.NewTypeName(token.NoPos, localPkg.Types, fmt.Sprintf("%sParameters", c.GoogleResourceName), nil)
-	remoteNamed, err := c.Cache.GetType(remotePkgPath, c.GoogleResourceName)
+	paramsName := types.NewTypeName(token.NoPos, localPkg.Types, fmt.Sprintf("%sParameters", googleResourceName), nil)
+	remoteNamed, err := r.cache.GetType(remotePkgPath, googleResourceName)
 	if err != nil {
 		panic(err)
 	}
 
-	paramsMerger := twtypes.NewMerger(paramsName, []*types.Named{remoteNamed})
 	pt := cmd.Type{
 		Imports:   file.Imports,
-		Cache:     c.Cache,
-		Generator: paramsMerger,
+		Cache:     r.cache,
+		Generator: twtypes.NewMerger(paramsName, []*types.Named{remoteNamed}),
 	}
 	paramsStr, err := pt.Run()
 	if err != nil {
@@ -102,12 +118,11 @@ func (c *CRD) GenerateCRDFile() ([]byte, error) {
 	// TODO(muvaf): We need a way to to figure out which fields are update-able
 	// which are not and don't repeat all fields in both spec and status.
 
-	observationName := types.NewTypeName(token.NoPos, localPkg.Types, fmt.Sprintf("%sObservation", c.GoogleResourceName), nil)
-	observationMerger := twtypes.NewMerger(observationName, []*types.Named{remoteNamed})
+	observationName := types.NewTypeName(token.NoPos, localPkg.Types, fmt.Sprintf("%sObservation", googleResourceName), nil)
 	ot := cmd.Type{
 		Imports:   file.Imports,
-		Cache:     c.Cache,
-		Generator: observationMerger,
+		Cache:     r.cache,
+		Generator: twtypes.NewMerger(observationName, []*types.Named{remoteNamed}),
 	}
 	observationStr, err := ot.Run()
 	if err != nil {
@@ -116,7 +131,7 @@ func (c *CRD) GenerateCRDFile() ([]byte, error) {
 
 	input := map[string]interface{}{
 		"CRD": map[string]string{
-			"Kind": strings.Title(c.GoogleResourceName),
+			"Kind": strings.Title(googleResourceName),
 		},
 		"Types": map[string]string{
 			"Parameters":  paramsStr,

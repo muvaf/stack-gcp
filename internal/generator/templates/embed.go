@@ -26,3 +26,6 @@ var GroupVersionInfoTemplate string
 
 //go:embed crd_types.go.tmpl
 var CRDTypesTemplate string
+
+//go:embed conversions.go.tmpl
+var ConversionsTemplate string
