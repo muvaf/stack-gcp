@@ -29,7 +29,7 @@ const (
 	LateInitializeFuncTmpl = `
 // {{ .FunctionName }} late initializes the {{ .ATypeName }} with the information
 // from given {{ .BTypeName }} and reports whether any change has been made.
-func {{ .FunctionName }}(a {{ .ATypeName }}, b {{ .BTypeName }}) bool {
+func {{ .FunctionName }}(a *{{ .ATypeName }}, b {{ .BTypeName }}) bool {
   li := {{ .RuntimeResourceImportAlias }}NewLateInitializer()
 {{ .Statements }}
   return li.IsChanged()

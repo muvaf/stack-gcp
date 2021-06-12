@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/muvaf/typewriter/pkg/packages"
@@ -21,7 +22,7 @@ type Conversions struct {
 }
 
 func (c *Conversions) GenerateConversionsFile(specTypePath, statusTypePath, gcpTypePath string) ([]byte, error) {
-	targetPkgName := gcpTypePath[strings.LastIndex(gcpTypePath, ".")+1:]
+	pkgName := gcpTypePath[strings.LastIndex(gcpTypePath, ".")+1:]
 	specType, err := c.cache.GetTypeWithFullPath(specTypePath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "cannot get spec type: %s", specTypePath)
@@ -34,7 +35,7 @@ func (c *Conversions) GenerateConversionsFile(specTypePath, statusTypePath, gcpT
 	if err != nil {
 		return nil, errors.Wrapf(err, "cannot get target gcp type: %s", gcpTypePath)
 	}
-	file := wrapper.NewFile(strings.ToLower(targetPkgName), templates.ConversionsTemplate,
+	file := wrapper.NewFile(strings.ToLower(pkgName), templates.ConversionsTemplate,
 		wrapper.WithHeaderPath("hack/boilerplate.go.txt"))
 
 	lateInitGen := NewLateInitializeFn(c.cache, file.Imports)
@@ -68,6 +69,37 @@ func (c *Conversions) GenerateConversionsFile(specTypePath, statusTypePath, gcpT
 	b, err := file.Wrap(input)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot wrap conversions file")
+	}
+	return b, nil
+}
+
+func NewController(c *packages.Cache) *Controller {
+	return &Controller{
+		cache: c,
+	}
+}
+
+type Controller struct {
+	cache *packages.Cache
+}
+
+func (c *Controller) GenerateControllerFile(group, kind, version string) ([]byte, error) {
+	pkgName := fmt.Sprintf("github.com/crossplane/provider-gcp/apis/%s/%s", group, version)
+	file := wrapper.NewFile(pkgName, templates.ControllerTemplate,
+		wrapper.WithHeaderPath("hack/boilerplate.go.txt"))
+
+	input := map[string]interface{}{
+		"CRD": map[string]string{
+			"Group":      group,
+			"Version":    version,
+			"Kind":       kind,
+			"KindLower":  strings.ToLower(kind),
+			"GroupLower": strings.ToLower(group),
+		},
+	}
+	b, err := file.Wrap(input)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot wrap controller file")
 	}
 	return b, nil
 }

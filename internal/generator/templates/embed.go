@@ -29,3 +29,6 @@ var CRDTypesTemplate string
 
 //go:embed conversions.go.tmpl
 var ConversionsTemplate string
+
+//go:embed controller.go.tmpl
+var ControllerTemplate string

@@ -58,6 +58,7 @@ const (
 	GroupVersionInfoFileName = "zz_groupversion_info.go"
 	CRDTypesFileNameFmt      = "zz_%s_types.go"
 	ConversionsFileName      = "zz_conversions.go"
+	ControllerFileName       = "zz_controller.go"
 )
 
 type GroupCmd struct {
@@ -156,24 +157,36 @@ func (c *ControllersCmd) Run(ctx context.Context) error {
 	cache := packages.NewCache()
 	list := c.Include
 	conversionsGen := generator.NewConversions(cache)
+	controllerGen := generator.NewController(cache)
 	for _, resourceName := range list {
 		paramsTypePath := fmt.Sprintf("%s.%sParameters", absSourcePkgPath, strings.Title(resourceName))
 		observationTypePath := fmt.Sprintf("%s.%sObservation", absSourcePkgPath, strings.Title(resourceName))
 		targetTypePath := fmt.Sprintf("%s.%s", filepath.Join(GoogleDCLPackagePath, c.GoogleGroupName), strings.Title(resourceName))
-		content, err := conversionsGen.GenerateConversionsFile(paramsTypePath, observationTypePath, targetTypePath)
+		conversionsContent, err := conversionsGen.GenerateConversionsFile(paramsTypePath, observationTypePath, targetTypePath)
 		if err != nil {
 			return errors.Wrapf(err, "cannot generate conversions file for %s", resourceName)
 		}
-		conversionsFileFolder := filepath.Join(ControllersFolderPath, c.GoogleGroupName, strings.ToLower(resourceName))
-		if err := os.MkdirAll(conversionsFileFolder, os.ModePerm); err != nil {
-			return errors.Wrapf(err, "cannot create new folder: %s", conversionsFileFolder)
+		controllerContent, err := controllerGen.GenerateControllerFile(strings.ToLower(c.GoogleGroupName), strings.Title(resourceName), c.APIVersion)
+		if err != nil {
+			return errors.Wrapf(err, "cannot generate controller file for %s", resourceName)
 		}
-		conversionsFilePath := filepath.Join(conversionsFileFolder, ConversionsFileName)
+		controllerFolderPath := filepath.Join(ControllersFolderPath, c.GoogleGroupName, strings.ToLower(resourceName))
+		if err := os.MkdirAll(controllerFolderPath, os.ModePerm); err != nil {
+			return errors.Wrapf(err, "cannot create new folder: %s", controllerFolderPath)
+		}
+		conversionsFilePath := filepath.Join(controllerFolderPath, ConversionsFileName)
 		if err := os.RemoveAll(conversionsFilePath); err != nil {
 			return errors.Wrapf(err, "cannot delete conversions file: %s", conversionsFilePath)
 		}
-		if err := WriteFile(conversionsFilePath, content, os.ModePerm, !*ctx.Value("debug").(*bool)); err != nil {
+		if err := WriteFile(conversionsFilePath, conversionsContent, os.ModePerm, !*ctx.Value("debug").(*bool)); err != nil {
 			return errors.Wrapf(err, "cannot write conversions file: %s", conversionsFilePath)
+		}
+		controllerFilePath := filepath.Join(controllerFolderPath, ControllerFileName)
+		if err := os.RemoveAll(controllerFilePath); err != nil {
+			return errors.Wrapf(err, "cannot delete controller file: %s", conversionsFilePath)
+		}
+		if err := WriteFile(controllerFilePath, controllerContent, os.ModePerm, !*ctx.Value("debug").(*bool)); err != nil {
+			return errors.Wrapf(err, "cannot write controller file: %s", controllerFilePath)
 		}
 	}
 	return nil

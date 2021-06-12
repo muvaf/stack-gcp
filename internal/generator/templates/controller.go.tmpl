@@ -1,0 +1,119 @@
+{{ .Header }}
+
+package {{ .CRD.KindLower }}
+
+import (
+	"context"
+
+	"github.com/GoogleCloudPlatform/declarative-resource-client-library/dcl"
+	"github.com/GoogleCloudPlatform/declarative-resource-client-library/services/google/{{ .CRD.Group }}"
+	"github.com/pkg/errors"
+	"k8s.io/client-go/util/workqueue"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+
+	"github.com/crossplane/crossplane-runtime/pkg/event"
+	"github.com/crossplane/crossplane-runtime/pkg/logging"
+	"github.com/crossplane/crossplane-runtime/pkg/ratelimiter"
+	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
+	"github.com/crossplane/crossplane-runtime/pkg/resource"
+
+	"github.com/crossplane/provider-gcp/apis/{{ .CRD.Group }}/{{ .CRD.Version }}"
+	gcp "github.com/crossplane/provider-gcp/pkg/clients"
+)
+
+// Error strings.
+const (
+	errNewClient     = "cannot create new {{ .CRD.Group }} client"
+	errNot{{ .CRD.Kind }}    = "managed resource is not a {{ .CRD.Kind }}"
+	errGet{{ .CRD.Kind }}    = "cannot get {{ .CRD.Kind }}"
+	errCreate{{ .CRD.Kind }} = "cannot create {{ .CRD.Kind }}"
+	errDelete{{ .CRD.Kind }} = "cannot delete {{ .CRD.Kind }}"
+)
+
+// Setup{{ .CRD.Kind }} adds a controller that reconciles {{ .CRD.Kind }}
+// managed resources.
+func Setup{{ .CRD.Kind }}(mgr ctrl.Manager, l logging.Logger, rl workqueue.RateLimiter) error {
+	name := managed.ControllerName({{ .CRD.Version }}.{{ .CRD.Kind }}GroupKind)
+	return ctrl.NewControllerManagedBy(mgr).
+		Named(name).
+		WithOptions(controller.Options{
+			RateLimiter: ratelimiter.NewDefaultManagedRateLimiter(rl),
+		}).
+		For(&{{ .CRD.Version }}.{{ .CRD.Kind }}{}).
+		Complete(managed.NewReconciler(mgr,
+			resource.ManagedKind({{ .CRD.Version }}.{{ .CRD.Kind }}GroupVersionKind),
+			managed.WithExternalConnecter(&connector{kube: mgr.GetClient()}),
+			managed.WithReferenceResolver(managed.NewAPISimpleReferenceResolver(mgr.GetClient())),
+			managed.WithLogger(l.WithValues("controller", name)),
+			managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name)))))
+}
+
+type connector struct {
+	kube client.Client
+}
+
+func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
+	_, blob, err := gcp.GetAuthInfoAlt(ctx, c.kube, mg)
+	if err != nil {
+		return nil, err
+	}
+	cfg := dcl.NewConfig(dcl.WithCredentialsJSON(blob))
+	return &external{
+		{{ .CRD.Group }}: {{ .CRD.Group }}.NewClient(cfg),
+		kube:      c.kube,
+	}, errors.Wrap(err, errNewClient)
+}
+
+type external struct {
+	kube      client.Client
+	{{ .CRD.Group }} *{{ .CRD.Group }}.Client
+}
+
+func (e *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
+	cr, ok := mg.(*{{ .CRD.Version }}.{{ .CRD.Kind }})
+	if !ok {
+		return managed.ExternalObservation{}, errors.New(errNot{{ .CRD.Kind }})
+	}
+	cl := generate{{ .CRD.Kind }}(cr.Spec.ForProvider)
+	resp, err := e.{{ .CRD.Group }}.Get{{ .CRD.Kind }}(ctx, &cl)
+	if err != nil {
+		return managed.ExternalObservation{}, errors.Wrap(resource.Ignore(gcp.IsErrorNotFound, err), errGet{{ .CRD.Kind }})
+	}
+	cr.Status.AtProvider = generate{{ .CRD.Kind }}Observation(*resp)
+	return managed.ExternalObservation{
+		ResourceExists:          true,
+		ResourceUpToDate:        isUpToDate(cr.Spec.ForProvider, *resp),
+		ResourceLateInitialized: lateInitialize(&cr.Spec.ForProvider, *resp),
+	}, nil
+}
+
+func (e *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
+	cr, ok := mg.(*{{ .CRD.Version }}.{{ .CRD.Kind }})
+	if !ok {
+		return managed.ExternalCreation{}, errors.New(errNot{{ .CRD.Kind }})
+	}
+	cl := generate{{ .CRD.Kind }}(cr.Spec.ForProvider)
+	_, err := e.{{ .CRD.Group }}.Apply{{ .CRD.Kind }}(ctx, &cl, gcp.DCLCreateOptions...)
+	return managed.ExternalCreation{}, errors.Wrap(err, errCreate{{ .CRD.Kind }})
+}
+
+func (e *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
+	cr, ok := mg.(*{{ .CRD.Version }}.{{ .CRD.Kind }})
+	if !ok {
+		return managed.ExternalUpdate{}, errors.New(errNot{{ .CRD.Kind }})
+	}
+	cl := generate{{ .CRD.Kind }}(cr.Spec.ForProvider)
+	_, err := e.{{ .CRD.Group }}.Apply{{ .CRD.Kind }}(ctx, &cl, gcp.DCLUpdateOptions...)
+	return managed.ExternalUpdate{}, errors.Wrap(err, errCreate{{ .CRD.Kind }})
+}
+
+func (e *external) Delete(ctx context.Context, mg resource.Managed) error {
+	cr, ok := mg.(*{{ .CRD.Version }}.{{ .CRD.Kind }})
+	if !ok {
+		return errors.New(errNot{{ .CRD.Kind }})
+	}
+	cl := generate{{ .CRD.Kind }}(cr.Spec.ForProvider)
+	return errors.Wrap(e.container.DeleteCluster(ctx, &cl), errDelete{{ .CRD.Kind }})
+}
