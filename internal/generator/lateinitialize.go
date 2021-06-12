@@ -31,21 +31,21 @@ const (
 // from given {{ .BTypeName }} and reports whether any change has been made.
 func {{ .FunctionName }}(a {{ .ATypeName }}, b {{ .BTypeName }}) bool {
   li := {{ .RuntimeResourceImportAlias }}NewLateInitializer()
-  {{ .Statements }}
+{{ .Statements }}
   return li.IsChanged()
 }`
 	LateInitializeMapTmpl = `
 if len({{ .AFieldPath }}) == 0 && len({{ .BFieldPath }}) != 0 {
   {{ .AFieldPath }} = make({{ .TypeA }}, len({{ .BFieldPath }}))
   for {{ .Key }} := range {{ .BFieldPath }} {
-    {{ .Statements }}
+{{ .Statements }}
   }
 }`
 	LateInitializeSliceTmpl = `
 if len({{ .AFieldPath }}) == 0 && len({{ .BFieldPath }}) != 0 {
   {{ .AFieldPath }} = make({{ .TypeA }}, len({{ .BFieldPath }}))
   for {{ .Index }} := range {{ .BFieldPath }} {
-    {{ .Statements }}
+{{ .Statements }}
   }
 }`
 	LateInitializePointerTmpl = `
@@ -53,7 +53,7 @@ if {{ .BFieldPath }} != nil {
   if {{ .AFieldPath }} == nil {
     {{ .AFieldPath }} = new({{ .NonPointerTypeA }})
   }
-  {{ .Statements }}
+{{ .Statements }}
 }`
 )
 
@@ -77,15 +77,7 @@ type LateInitializeFn struct {
 	imports *packages.Imports
 }
 
-func (li *LateInitializeFn) Generate(sourceTypePath, targetTypePath string) (string, error) {
-	sourceType, err := li.cache.GetTypeWithFullPath(sourceTypePath)
-	if err != nil {
-		return "", errors.Wrapf(err, "cannot get source type: %s", sourceTypePath)
-	}
-	targetType, err := li.cache.GetTypeWithFullPath(targetTypePath)
-	if err != nil {
-		return "", errors.Wrapf(err, "cannot get target type: %s", targetTypePath)
-	}
+func (li *LateInitializeFn) Generate(sourceType, targetType *types.Named) (string, error) {
 	tr := traverser.NewGeneric(li.imports,
 		traverser.WithBasicPointerTemplate(LateInitializeBasicPtrTmpl),
 		traverser.WithPointerTemplate(LateInitializePointerTmpl),

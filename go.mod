@@ -2,6 +2,10 @@ module github.com/crossplane/provider-gcp
 
 go 1.16
 
+replace (
+	github.com/muvaf/typewriter => ../../muvaf/typewriter
+)
+
 require (
 	cloud.google.com/go v0.82.0 // indirect
 	cloud.google.com/go/storage v1.15.0

@@ -6,4 +6,10 @@ import (
 {{ .Imports }}
 )
 
+{{ .ProduceGCPStructFn }}
+
+{{ .ProduceObservationFn }}
+
 {{ .LateInitializeFn }}
+
+{{ .IsUpToDateFn }}

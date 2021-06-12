@@ -157,9 +157,10 @@ func (c *ControllersCmd) Run(ctx context.Context) error {
 	list := c.Include
 	conversionsGen := generator.NewConversions(cache)
 	for _, resourceName := range list {
-		sourceTypePath := fmt.Sprintf("%s.%sParameters", absSourcePkgPath, strings.Title(resourceName))
+		paramsTypePath := fmt.Sprintf("%s.%sParameters", absSourcePkgPath, strings.Title(resourceName))
+		observationTypePath := fmt.Sprintf("%s.%sObservation", absSourcePkgPath, strings.Title(resourceName))
 		targetTypePath := fmt.Sprintf("%s.%s", filepath.Join(GoogleDCLPackagePath, c.GoogleGroupName), strings.Title(resourceName))
-		content, err := conversionsGen.GenerateConversionsFile(sourceTypePath, targetTypePath)
+		content, err := conversionsGen.GenerateConversionsFile(paramsTypePath, observationTypePath, targetTypePath)
 		if err != nil {
 			return errors.Wrapf(err, "cannot generate conversions file for %s", resourceName)
 		}
