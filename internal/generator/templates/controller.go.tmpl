@@ -115,5 +115,5 @@ func (e *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNot{{ .CRD.Kind }})
 	}
 	cl := generate{{ .CRD.Kind }}(cr.Spec.ForProvider)
-	return errors.Wrap(e.container.DeleteCluster(ctx, &cl), errDelete{{ .CRD.Kind }})
+	return errors.Wrap(e.{{ .CRD.Group }}.Delete{{ .CRD.Kind }}(ctx, &cl), errDelete{{ .CRD.Kind }})
 }

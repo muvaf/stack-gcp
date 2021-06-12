@@ -18,7 +18,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -36,8 +35,7 @@ var cli GeneratorCLI
 
 func main() {
 	kongCtx := kong.Parse(&cli)
-	ctx := context.WithValue(context.TODO(), "debug", &cli.Debug)
-	kongCtx.BindTo(ctx, (*context.Context)(nil))
+	cli.cache = packages.NewCache()
 	kongCtx.FatalIfErrorf(kongCtx.Run())
 }
 
@@ -46,6 +44,9 @@ type GeneratorCLI struct {
 	Group       GroupCmd       `kong:"cmd,help:'Generate group files.'"`
 	Crds        CrdsCmd        `kong:"cmd,help:'Generate CRD files.'"`
 	Controllers ControllersCmd `kong:"cmd,help:'Generate controller files.'"`
+	Full        FullCmd        `kong:"cmd,help:'Generate all necessary files.'"`
+
+	cache *packages.Cache
 }
 
 const (
@@ -61,41 +62,81 @@ const (
 	ControllerFileName       = "zz_controller.go"
 )
 
-type GroupCmd struct {
-	ShortName  string `kong:"required,help:'Single word name of the group, such as container.'"`
-	APIVersion string `kong:"required,help:'API version of the group, such as v1alpha1'"`
+type FullCmd struct {
+	Group    string   `kong:"required,help:'Name of the group, such as container.'"`
+	Version  string   `kong:"required,help:'Version of the group, such as v1alpha1'"`
+	KindList []string `kong:"required,help:'List of resource names to be generated, such as Cluster.'"`
 }
 
-func (g *GroupCmd) Run(ctx context.Context) error {
+func (f *FullCmd) Run() error {
+	gvFolderPath := filepath.Join(APISFolderPath, f.Group, f.Version)
+	if err := os.RemoveAll(gvFolderPath); err != nil {
+		return errors.Wrapf(err, "cannot delete group folder: %s", gvFolderPath)
+	}
+	group := &GroupCmd{
+		Name:    f.Group,
+		Version: f.Version,
+	}
+	if err := group.Run(); err != nil {
+		return errors.Wrap(err, "cannot generate group")
+	}
+	crds := &CrdsCmd{
+		GoogleGroupName: f.Group,
+		Version:         f.Version,
+		Include:         f.KindList,
+	}
+	if err := crds.Run(); err != nil {
+		return errors.Wrap(err, "cannot generate crds")
+	}
+	// temp hack to get the group package compiling so that controllers generators
+	// can read it.
+	genCmd := exec.Command("make", "generate")
+	if err := genCmd.Run(); err != nil {
+		return errors.Wrap(err, "cannot run make generate")
+	}
+	controllers := &ControllersCmd{
+		GoogleGroupName: f.Group,
+		Version:         f.Version,
+		Include:         f.KindList,
+	}
+	return errors.Wrap(controllers.Run(), "cannot generate controllers")
+}
+
+type GroupCmd struct {
+	Name    string `kong:"required,help:'Name of the group, such as container.'"`
+	Version string `kong:"required,help:'Version of the group, such as v1alpha1'"`
+}
+
+func (g *GroupCmd) Run() error {
 	group := &generator.Group{
-		ShortName:  g.ShortName,
-		LongName:   g.ShortName + ".gcp.crossplane.io",
-		APIVersion: g.APIVersion,
+		ShortName:  g.Name,
+		LongName:   g.Name + ".gcp.crossplane.io",
+		APIVersion: g.Version,
 	}
 	docContent, err := group.GenerateDocFile()
 	if err != nil {
 		return errors.Wrap(err, "doc file cannot be generated")
 	}
-	folderPath := filepath.Join(APISFolderPath, g.ShortName, g.APIVersion)
+	folderPath := filepath.Join(APISFolderPath, g.Name, g.Version)
 	if err := os.MkdirAll(folderPath, os.ModePerm); err != nil {
 		return errors.Wrapf(err, "cannot create new folder: %s", folderPath)
 	}
-	docFilePath := filepath.Join(APISFolderPath, g.ShortName, g.APIVersion, DocFileName)
+	docFilePath := filepath.Join(APISFolderPath, g.Name, g.Version, DocFileName)
 	if err := os.RemoveAll(docFilePath); err != nil {
 		return errors.Wrapf(err, "cannot delete doc file: %s", docFilePath)
 	}
-	if err := WriteFile(docFilePath, docContent, os.ModePerm, !*ctx.Value("debug").(*bool)); err != nil {
+	if err := WriteFile(docFilePath, docContent, os.ModePerm, !cli.Debug); err != nil {
 		return errors.Wrap(err, "cannot write doc file")
 	}
 	gvContent, err := group.GenerateGroupVersionFile()
 	if err != nil {
 		return errors.Wrap(err, "group version file cannot be generated")
 	}
-	gvFilePath := filepath.Join(APISFolderPath, g.ShortName, g.APIVersion, GroupVersionInfoFileName)
+	gvFilePath := filepath.Join(APISFolderPath, g.Name, g.Version, GroupVersionInfoFileName)
 	if err := os.RemoveAll(gvFilePath); err != nil {
 		return errors.Wrapf(err, "cannot delete groupversion_info file: %s", gvFilePath)
 	}
-	if err := WriteFile(gvFilePath, gvContent, os.ModePerm, !*ctx.Value("debug").(*bool)); err != nil {
+	if err := WriteFile(gvFilePath, gvContent, os.ModePerm, !cli.Debug); err != nil {
 		return errors.Wrap(err, "cannot write doc file")
 	}
 	return nil
@@ -103,13 +144,13 @@ func (g *GroupCmd) Run(ctx context.Context) error {
 
 type CrdsCmd struct {
 	GoogleGroupName string
-	APIVersion      string
+	Version         string
 	//Exclude         []string
 	Include []string
 }
 
-func (c *CrdsCmd) Run(ctx context.Context) error {
-	localPkgPath := filepath.Join(APISFolderPath, c.GoogleGroupName, c.APIVersion)
+func (c *CrdsCmd) Run() error {
+	localPkgPath := filepath.Join(APISFolderPath, c.GoogleGroupName, c.Version)
 	absLocalPkgPath, err := filepath.Abs(localPkgPath)
 	if err != nil {
 		return errors.Wrapf(err, "cannot calculate absolute path of local package: %s", localPkgPath)
@@ -117,24 +158,23 @@ func (c *CrdsCmd) Run(ctx context.Context) error {
 	if err := os.MkdirAll(localPkgPath, os.ModePerm); err != nil {
 		return errors.Wrapf(err, "cannot create new folder: %s", localPkgPath)
 	}
-	cache := packages.NewCache()
 	list := c.Include
 	apiGroup := generator.Group{
 		ShortName:  c.GoogleGroupName,
 		LongName:   c.GoogleGroupName + ".gcp.crossplane.io",
-		APIVersion: c.APIVersion,
+		APIVersion: c.Version,
 	}
-	resourcesGen := generator.NewResources(cache, GoogleDCLPackagePath, absLocalPkgPath, apiGroup)
+	resourcesGen := generator.NewResources(cli.cache, GoogleDCLPackagePath, absLocalPkgPath, apiGroup)
 	for _, resourceName := range list {
-		content, err := resourcesGen.GenerateCRDFile(c.GoogleGroupName, resourceName)
-		if err != nil {
-			return errors.Wrapf(err, "cannot generate crd file for %s", resourceName)
-		}
 		crdFilePath := filepath.Join(APISFolderPath, apiGroup.ShortName, apiGroup.APIVersion, fmt.Sprintf(CRDTypesFileNameFmt, strings.ToLower(resourceName)))
 		if err := os.RemoveAll(crdFilePath); err != nil {
 			return errors.Wrapf(err, "cannot delete crd file: %s", crdFilePath)
 		}
-		if err := WriteFile(crdFilePath, content, os.ModePerm, !*ctx.Value("debug").(*bool)); err != nil {
+		content, err := resourcesGen.GenerateCRDFile(c.GoogleGroupName, resourceName)
+		if err != nil {
+			return errors.Wrapf(err, "cannot generate crd file for %s", resourceName)
+		}
+		if err := WriteFile(crdFilePath, content, os.ModePerm, !cli.Debug); err != nil {
 			return errors.Wrapf(err, "cannot write crd file: %s", crdFilePath)
 		}
 	}
@@ -143,21 +183,20 @@ func (c *CrdsCmd) Run(ctx context.Context) error {
 
 type ControllersCmd struct {
 	GoogleGroupName string
-	APIVersion      string
+	Version         string
 	//Exclude         []string
 	Include []string
 }
 
-func (c *ControllersCmd) Run(ctx context.Context) error {
-	sourcePkgPath := filepath.Join(APISFolderPath, c.GoogleGroupName, c.APIVersion)
+func (c *ControllersCmd) Run() error {
+	sourcePkgPath := filepath.Join(APISFolderPath, c.GoogleGroupName, c.Version)
 	absSourcePkgPath, err := filepath.Abs(sourcePkgPath)
 	if err != nil {
 		return errors.Wrapf(err, "cannot calculate absolute path of local package: %s", sourcePkgPath)
 	}
-	cache := packages.NewCache()
 	list := c.Include
-	conversionsGen := generator.NewConversions(cache)
-	controllerGen := generator.NewController(cache)
+	conversionsGen := generator.NewConversions(cli.cache)
+	controllerGen := generator.NewController(cli.cache)
 	for _, resourceName := range list {
 		paramsTypePath := fmt.Sprintf("%s.%sParameters", absSourcePkgPath, strings.Title(resourceName))
 		observationTypePath := fmt.Sprintf("%s.%sObservation", absSourcePkgPath, strings.Title(resourceName))
@@ -166,7 +205,7 @@ func (c *ControllersCmd) Run(ctx context.Context) error {
 		if err != nil {
 			return errors.Wrapf(err, "cannot generate conversions file for %s", resourceName)
 		}
-		controllerContent, err := controllerGen.GenerateControllerFile(strings.ToLower(c.GoogleGroupName), strings.Title(resourceName), c.APIVersion)
+		controllerContent, err := controllerGen.GenerateControllerFile(strings.ToLower(c.GoogleGroupName), strings.Title(resourceName), c.Version)
 		if err != nil {
 			return errors.Wrapf(err, "cannot generate controller file for %s", resourceName)
 		}
@@ -178,14 +217,14 @@ func (c *ControllersCmd) Run(ctx context.Context) error {
 		if err := os.RemoveAll(conversionsFilePath); err != nil {
 			return errors.Wrapf(err, "cannot delete conversions file: %s", conversionsFilePath)
 		}
-		if err := WriteFile(conversionsFilePath, conversionsContent, os.ModePerm, !*ctx.Value("debug").(*bool)); err != nil {
+		if err := WriteFile(conversionsFilePath, conversionsContent, os.ModePerm, !cli.Debug); err != nil {
 			return errors.Wrapf(err, "cannot write conversions file: %s", conversionsFilePath)
 		}
 		controllerFilePath := filepath.Join(controllerFolderPath, ControllerFileName)
 		if err := os.RemoveAll(controllerFilePath); err != nil {
 			return errors.Wrapf(err, "cannot delete controller file: %s", conversionsFilePath)
 		}
-		if err := WriteFile(controllerFilePath, controllerContent, os.ModePerm, !*ctx.Value("debug").(*bool)); err != nil {
+		if err := WriteFile(controllerFilePath, controllerContent, os.ModePerm, !cli.Debug); err != nil {
 			return errors.Wrapf(err, "cannot write controller file: %s", controllerFilePath)
 		}
 	}
