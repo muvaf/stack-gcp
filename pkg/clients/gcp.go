@@ -22,6 +22,8 @@ import (
 	"path"
 	"strings"
 
+	"github.com/GoogleCloudPlatform/declarative-resource-client-library/dcl"
+
 	"github.com/google/go-cmp/cmp"
 	"github.com/pkg/errors"
 	"google.golang.org/api/googleapi"
@@ -39,10 +41,43 @@ import (
 	"github.com/crossplane/provider-gcp/apis/v1beta1"
 )
 
+var (
+	DCLCreateOptions = []dcl.ApplyOption{
+		dcl.WithLifecycleParam(dcl.BlockDestruction),
+	}
+	DCLUpdateOptions = []dcl.ApplyOption{
+		dcl.WithLifecycleParam(dcl.BlockDestruction),
+		dcl.WithLifecycleParam(dcl.BlockCreation),
+	}
+)
+
 // GetAuthInfo returns the necessary authentication information that is necessary
 // to use when the controller connects to GCP API in order to reconcile the managed
 // resource.
 func GetAuthInfo(ctx context.Context, c client.Client, mg resource.Managed) (projectID string, opts option.ClientOption, err error) {
+	switch {
+	case mg.GetProviderConfigReference() != nil:
+		id, blob, err := UseProviderConfig(ctx, c, mg)
+		if err != nil {
+			return "", nil, err
+		}
+		return id, option.WithCredentialsJSON(blob), nil
+	case mg.GetProviderReference() != nil:
+		id, blob, err := UseProvider(ctx, c, mg)
+		if err != nil {
+			return "", nil, err
+		}
+		return id, option.WithCredentialsJSON(blob), nil
+	default:
+		return "", nil, errors.New("neither providerConfigRef nor providerRef is given")
+	}
+}
+
+// GetAuthInfoAlt returns the necessary authentication information that is necessary
+// to use when the controller connects to GCP API in order to reconcile the managed
+// resource.
+// todo(muvaf): temporary until GetAuthInfo is refactored to return only JSON.
+func GetAuthInfoAlt(ctx context.Context, c client.Client, mg resource.Managed) (projectID string, blob []byte, err error) {
 	switch {
 	case mg.GetProviderConfigReference() != nil:
 		return UseProviderConfig(ctx, c, mg)
@@ -55,7 +90,7 @@ func GetAuthInfo(ctx context.Context, c client.Client, mg resource.Managed) (pro
 
 // UseProvider to return GCP authentication information.
 // Deprecated: Use UseProviderConfig
-func UseProvider(ctx context.Context, c client.Client, mg resource.Managed) (projectID string, opts option.ClientOption, err error) {
+func UseProvider(ctx context.Context, c client.Client, mg resource.Managed) (projectID string, blob []byte, err error) {
 	p := &v1alpha3.Provider{}
 	if err := c.Get(ctx, types.NamespacedName{Name: mg.GetProviderReference().Name}, p); err != nil {
 		return "", nil, err
@@ -66,11 +101,11 @@ func UseProvider(ctx context.Context, c client.Client, mg resource.Managed) (pro
 	if err := c.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: ref.Namespace}, s); err != nil {
 		return "", nil, err
 	}
-	return p.Spec.ProjectID, option.WithCredentialsJSON(s.Data[ref.Key]), nil
+	return p.Spec.ProjectID, s.Data[ref.Key], nil
 }
 
 // UseProviderConfig to return GCP authentication information.
-func UseProviderConfig(ctx context.Context, c client.Client, mg resource.Managed) (projectID string, opts option.ClientOption, err error) {
+func UseProviderConfig(ctx context.Context, c client.Client, mg resource.Managed) (projectID string, blob []byte, err error) {
 	pc := &v1beta1.ProviderConfig{}
 	t := resource.NewProviderConfigUsageTracker(c, &v1beta1.ProviderConfigUsage{})
 	if err := t.Track(ctx, mg); err != nil {
@@ -83,7 +118,7 @@ func UseProviderConfig(ctx context.Context, c client.Client, mg resource.Managed
 	if err != nil {
 		return "", nil, errors.Wrap(err, "cannot get credentials")
 	}
-	return pc.Spec.ProjectID, option.WithCredentialsJSON(data), nil
+	return pc.Spec.ProjectID, data, nil
 }
 
 // IsErrorNotFoundGRPC gets a value indicating whether the given error represents
