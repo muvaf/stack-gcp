@@ -1,7 +1,6 @@
 package generator
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/muvaf/typewriter/pkg/packages"
@@ -21,8 +20,7 @@ type Conversions struct {
 	cache *packages.Cache
 }
 
-func (c *Conversions) GenerateConversionsFile(specTypePath, statusTypePath, gcpTypePath string) ([]byte, error) {
-	pkgName := gcpTypePath[strings.LastIndex(gcpTypePath, ".")+1:]
+func (c *Conversions) GenerateConversionsFile(localPkgPath, localPkgName, specTypePath, statusTypePath, gcpTypePath string) ([]byte, error) {
 	specType, err := c.cache.GetTypeWithFullPath(specTypePath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "cannot get spec type: %s", specTypePath)
@@ -35,7 +33,7 @@ func (c *Conversions) GenerateConversionsFile(specTypePath, statusTypePath, gcpT
 	if err != nil {
 		return nil, errors.Wrapf(err, "cannot get target gcp type: %s", gcpTypePath)
 	}
-	file := wrapper.NewFile(strings.ToLower(pkgName), templates.ConversionsTemplate,
+	file := wrapper.NewFile(localPkgPath, localPkgName, templates.ConversionsTemplate,
 		wrapper.WithHeaderPath("hack/boilerplate.go.txt"))
 
 	lateInitGen := NewLateInitializeFn(c.cache, file.Imports)
@@ -83,9 +81,8 @@ type Controller struct {
 	cache *packages.Cache
 }
 
-func (c *Controller) GenerateControllerFile(group, kind, version string) ([]byte, error) {
-	pkgName := fmt.Sprintf("github.com/crossplane/provider-gcp/apis/%s/%s", group, version)
-	file := wrapper.NewFile(pkgName, templates.ControllerTemplate,
+func (c *Controller) GenerateControllerFile(localPkgPath, localPkgName, group, kind, version string) ([]byte, error) {
+	file := wrapper.NewFile(localPkgPath, localPkgName, templates.ControllerTemplate,
 		wrapper.WithHeaderPath("hack/boilerplate.go.txt"))
 
 	input := map[string]interface{}{

@@ -50,7 +50,8 @@ type GeneratorCLI struct {
 }
 
 const (
-	GoogleDCLPackagePath = "github.com/GoogleCloudPlatform/declarative-resource-client-library/services/google"
+	GoogleDCLPackagePath   = "github.com/GoogleCloudPlatform/declarative-resource-client-library/services/google"
+	ProviderGCPPackagePath = "github.com/crossplane/provider-gcp"
 
 	APISFolderPath        = "apis"
 	ControllersFolderPath = "pkg/controller"
@@ -81,9 +82,9 @@ func (f *FullCmd) Run() error {
 		return errors.Wrap(err, "cannot generate group")
 	}
 	crds := &CrdsCmd{
-		GoogleGroupName: f.Group,
-		Version:         f.Version,
-		Include:         f.KindList,
+		Group:    f.Group,
+		Version:  f.Version,
+		KindList: f.KindList,
 	}
 	if err := crds.Run(); err != nil {
 		return errors.Wrap(err, "cannot generate crds")
@@ -95,9 +96,9 @@ func (f *FullCmd) Run() error {
 		return errors.Wrap(err, "cannot run make generate")
 	}
 	controllers := &ControllersCmd{
-		GoogleGroupName: f.Group,
-		Version:         f.Version,
-		Include:         f.KindList,
+		Group:    f.Group,
+		Version:  f.Version,
+		KindList: f.KindList,
 	}
 	return errors.Wrap(controllers.Run(), "cannot generate controllers")
 }
@@ -143,14 +144,13 @@ func (g *GroupCmd) Run() error {
 }
 
 type CrdsCmd struct {
-	GoogleGroupName string
-	Version         string
-	//Exclude         []string
-	Include []string
+	Group    string
+	Version  string
+	KindList []string
 }
 
 func (c *CrdsCmd) Run() error {
-	localPkgPath := filepath.Join(APISFolderPath, c.GoogleGroupName, c.Version)
+	localPkgPath := filepath.Join(APISFolderPath, c.Group, c.Version)
 	absLocalPkgPath, err := filepath.Abs(localPkgPath)
 	if err != nil {
 		return errors.Wrapf(err, "cannot calculate absolute path of local package: %s", localPkgPath)
@@ -158,10 +158,10 @@ func (c *CrdsCmd) Run() error {
 	if err := os.MkdirAll(localPkgPath, os.ModePerm); err != nil {
 		return errors.Wrapf(err, "cannot create new folder: %s", localPkgPath)
 	}
-	list := c.Include
+	list := c.KindList
 	apiGroup := generator.Group{
-		ShortName:  c.GoogleGroupName,
-		LongName:   c.GoogleGroupName + ".gcp.crossplane.io",
+		ShortName:  c.Group,
+		LongName:   c.Group + ".gcp.crossplane.io",
 		APIVersion: c.Version,
 	}
 	resourcesGen := generator.NewResources(cli.cache, GoogleDCLPackagePath, absLocalPkgPath, apiGroup)
@@ -170,7 +170,7 @@ func (c *CrdsCmd) Run() error {
 		if err := os.RemoveAll(crdFilePath); err != nil {
 			return errors.Wrapf(err, "cannot delete crd file: %s", crdFilePath)
 		}
-		content, err := resourcesGen.GenerateCRDFile(c.GoogleGroupName, resourceName)
+		content, err := resourcesGen.GenerateCRDFile(c.Group, resourceName)
 		if err != nil {
 			return errors.Wrapf(err, "cannot generate crd file for %s", resourceName)
 		}
@@ -182,34 +182,35 @@ func (c *CrdsCmd) Run() error {
 }
 
 type ControllersCmd struct {
-	GoogleGroupName string
-	Version         string
+	Group   string
+	Version string
 	//Exclude         []string
-	Include []string
+	KindList []string
 }
 
 func (c *ControllersCmd) Run() error {
-	sourcePkgPath := filepath.Join(APISFolderPath, c.GoogleGroupName, c.Version)
+	sourcePkgPath := filepath.Join(APISFolderPath, c.Group, c.Version)
 	absSourcePkgPath, err := filepath.Abs(sourcePkgPath)
 	if err != nil {
 		return errors.Wrapf(err, "cannot calculate absolute path of local package: %s", sourcePkgPath)
 	}
-	list := c.Include
+	list := c.KindList
 	conversionsGen := generator.NewConversions(cli.cache)
 	controllerGen := generator.NewController(cli.cache)
 	for _, resourceName := range list {
+		localPkgPath, localPkgName := filepath.Join(ProviderGCPPackagePath, ControllersFolderPath, strings.ToLower(c.Group), strings.ToLower(resourceName)), strings.ToLower(resourceName)
 		paramsTypePath := fmt.Sprintf("%s.%sParameters", absSourcePkgPath, strings.Title(resourceName))
 		observationTypePath := fmt.Sprintf("%s.%sObservation", absSourcePkgPath, strings.Title(resourceName))
-		targetTypePath := fmt.Sprintf("%s.%s", filepath.Join(GoogleDCLPackagePath, c.GoogleGroupName), strings.Title(resourceName))
-		conversionsContent, err := conversionsGen.GenerateConversionsFile(paramsTypePath, observationTypePath, targetTypePath)
+		targetTypePath := fmt.Sprintf("%s.%s", filepath.Join(GoogleDCLPackagePath, c.Group), strings.Title(resourceName))
+		conversionsContent, err := conversionsGen.GenerateConversionsFile(localPkgPath, localPkgName, paramsTypePath, observationTypePath, targetTypePath)
 		if err != nil {
 			return errors.Wrapf(err, "cannot generate conversions file for %s", resourceName)
 		}
-		controllerContent, err := controllerGen.GenerateControllerFile(strings.ToLower(c.GoogleGroupName), strings.Title(resourceName), c.Version)
+		controllerContent, err := controllerGen.GenerateControllerFile(localPkgPath, localPkgName, strings.ToLower(c.Group), strings.Title(resourceName), c.Version)
 		if err != nil {
 			return errors.Wrapf(err, "cannot generate controller file for %s", resourceName)
 		}
-		controllerFolderPath := filepath.Join(ControllersFolderPath, c.GoogleGroupName, strings.ToLower(resourceName))
+		controllerFolderPath := filepath.Join(ControllersFolderPath, c.Group, strings.ToLower(resourceName))
 		if err := os.MkdirAll(controllerFolderPath, os.ModePerm); err != nil {
 			return errors.Wrapf(err, "cannot create new folder: %s", controllerFolderPath)
 		}

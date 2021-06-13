@@ -23,7 +23,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/muvaf/typewriter/pkg/cmd"
 	"github.com/muvaf/typewriter/pkg/packages"
 	twtypes "github.com/muvaf/typewriter/pkg/types"
 	"github.com/muvaf/typewriter/pkg/wrapper"
@@ -47,10 +46,11 @@ type Group struct {
 }
 
 func (g *Group) GenerateDocFile() ([]byte, error) {
+	localPkgPath := filepath.Join("github.com/crossplane/provider-gcp/apis", g.ShortName, g.APIVersion)
 	input := map[string]interface{}{
 		"Group": g,
 	}
-	doc := wrapper.NewFile(g.APIVersion, templates.DocFileTemplate,
+	doc := wrapper.NewFile(localPkgPath, g.APIVersion, templates.DocFileTemplate,
 		wrapper.WithHeaderPath("hack/boilerplate.go.txt"))
 	b, err := doc.Wrap(input)
 	if err != nil {
@@ -60,10 +60,11 @@ func (g *Group) GenerateDocFile() ([]byte, error) {
 }
 
 func (g *Group) GenerateGroupVersionFile() ([]byte, error) {
+	localPkgPath := filepath.Join("github.com/crossplane/provider-gcp/apis", g.ShortName, g.APIVersion)
 	input := map[string]interface{}{
 		"Group": g,
 	}
-	gv := wrapper.NewFile(g.APIVersion, templates.GroupVersionInfoTemplate,
+	gv := wrapper.NewFile(localPkgPath, g.APIVersion, templates.GroupVersionInfoTemplate,
 		wrapper.WithHeaderPath("hack/boilerplate.go.txt"))
 	b, err := gv.Wrap(input)
 	if err != nil {
@@ -91,42 +92,45 @@ type Resources struct {
 func (r *Resources) GenerateCRDFile(googleGroupName, googleResourceName string) ([]byte, error) {
 	localPkgPath, localPkgName := r.LocalPackagePath, r.LocalPackagePath[strings.LastIndex(r.LocalPackagePath, "/")+1:]
 	remotePkgPath := filepath.Join(r.RemotePackagePath, googleGroupName)
-	file := wrapper.NewFile(localPkgName, templates.CRDTypesTemplate,
+	file := wrapper.NewFile(localPkgPath, localPkgName, templates.CRDTypesTemplate,
 		wrapper.WithHeaderPath("hack/boilerplate.go.txt"))
 
 	localPkg, err := r.cache.GetPackage(localPkgPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "cannot load local package: %s", localPkg)
 	}
-
-	paramsName := types.NewTypeName(token.NoPos, localPkg.Types, fmt.Sprintf("%sParameters", googleResourceName), nil)
+	fl := twtypes.NewFlattener(file.Imports,
+		twtypes.WithLocalPkg(localPkg.Types),
+		twtypes.WithRemotePkgPath(remotePkgPath),
+		twtypes.WithFieldFilters(OmitemptyAdder{}),
+	)
+	printer := twtypes.NewTypePrinter(file.Imports, localPkg.Types.Scope(), fl)
 	remoteNamed, err := r.cache.GetType(remotePkgPath, googleResourceName)
 	if err != nil {
-		panic(err)
+		return nil, errors.Wrapf(err, "cannot load remote type %s.%s", remotePkgPath, googleResourceName)
 	}
 
-	pt := cmd.Type{
-		Imports:   file.Imports,
-		Cache:     r.cache,
-		Generator: twtypes.NewMerger(paramsName, []*types.Named{remoteNamed}),
-	}
-	paramsStr, err := pt.Run()
+	paramsName := types.NewTypeName(token.NoPos, localPkg.Types, fmt.Sprintf("%sParameters", googleResourceName), nil)
+	paramsType, markers, err := twtypes.NewMerger(paramsName, []*types.Named{remoteNamed}).Generate()
 	if err != nil {
-		return nil, errors.Wrap(err, "cannot generate params struct")
+		return nil, errors.Wrap(err, "cannot generate parameters type")
+	}
+	paramsStr, err := printer.Print(paramsType, markers.Print())
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot print params type")
 	}
 
 	// TODO(muvaf): We need a way to to figure out which fields are update-able
 	// which are not and don't repeat all fields in both spec and status.
 
 	observationName := types.NewTypeName(token.NoPos, localPkg.Types, fmt.Sprintf("%sObservation", googleResourceName), nil)
-	ot := cmd.Type{
-		Imports:   file.Imports,
-		Cache:     r.cache,
-		Generator: twtypes.NewMerger(observationName, []*types.Named{remoteNamed}),
-	}
-	observationStr, err := ot.Run()
+	obsType, markers, err := twtypes.NewMerger(observationName, []*types.Named{remoteNamed}).Generate()
 	if err != nil {
-		return nil, errors.Wrap(err, "cannot generate observation struct")
+		return nil, errors.Wrap(err, "cannot generate observation type")
+	}
+	obsStr, err := printer.Print(obsType, markers.Print())
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot print observation type")
 	}
 
 	input := map[string]interface{}{
@@ -135,7 +139,7 @@ func (r *Resources) GenerateCRDFile(googleGroupName, googleResourceName string) 
 		},
 		"Types": map[string]string{
 			"Parameters":  paramsStr,
-			"Observation": observationStr,
+			"Observation": obsStr,
 		},
 	}
 	b, err := file.Wrap(input)
