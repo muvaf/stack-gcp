@@ -12,7 +12,7 @@ require (
 	github.com/google/go-cmp v0.5.5
 	github.com/imdario/mergo v0.3.10
 	github.com/mitchellh/copystructure v1.0.0
-	github.com/muvaf/typewriter v0.0.0-20210613225717-3b40de02fcd1
+	github.com/muvaf/typewriter v0.0.0-20210613234316-876041b190b5
 	github.com/pkg/errors v0.9.1
 	golang.org/x/time v0.0.0-20210220033141-f8bda1e9f3ba // indirect
 	google.golang.org/api v0.47.0
